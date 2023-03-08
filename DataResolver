@@ -1,0 +1,80 @@
+package br.com.pan.tesseract.modes.api.dataresolver;
+
+import static org.apache.commons.io.IOUtils.toByteArray;
+
+import java.io.IOException;
+import java.math.BigInteger;
+
+import com.google.gson.Gson;
+import io.restassured.response.Response;
+import org.json.JSONObject;
+
+public class DataResolver {
+    private GetValueObject getData;
+    private SetValueObject setData;
+    private JSONObject data;
+
+    private DataResolver(JSONObject data) {
+        getData = new GetValueObject(data);
+
+        setData = new SetValueObject(data);
+        this.data = data;
+    }
+
+    public static DataResolver getDataFromFile(String filename) {
+        try {
+            String content = new String(toByteArray(DataResolver.class.getResourceAsStream(filename)));
+
+            return loadData(content);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static DataResolver loadData(String dados) {
+
+        JSONObject data = new JSONObject(dados.trim());
+
+        return new DataResolver(data);
+    }
+    public static DataResolver loadData(Response reposta){
+        return loadData(reposta.getBody().asString());
+
+    }
+    public JSONObject get(){
+        return data;
+    }
+
+    public String getString(String propriedade) {
+        return get(propriedade);
+    }
+
+    public <T> T get(Class<T> clazz){
+        return new Gson().fromJson(data.toString(),clazz);
+    }
+    public <T> T get(String propriedade, Class<T> clazz) {
+        return get(propriedade, clazz);
+    }
+    public BigInteger getBigInteger(String propriedade) {
+        return BigInteger.valueOf(get(propriedade));
+    }
+
+    public Long getLong(String propriedade) {
+        return get(propriedade);
+    }
+
+    public Integer getInteger(String propriedade) {
+        return get(propriedade);
+    }
+
+    public <T> T get(String propriedade) {
+        return getData.get(propriedade);
+    }
+
+    public void set(String propriedade, Object value) {
+        setData.set(propriedade, value);
+    }
+
+    public void delete(String propriedade){ data.remove(propriedade);}
+}
+
