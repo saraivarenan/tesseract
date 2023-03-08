@@ -1,6 +1,3 @@
-package br.com.pan.tesseract.modes.api
-
-import br.com.pan.tesseract.modes.api.dataresolver.DataResolver
 import com.amazonaws.HttpMethod
 import com.amazonaws.HttpMethod.*
 import com.google.gson.Gson
