@@ -1,0 +1,58 @@
+
+import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
+
+
+public final class KafkaExecutor {
+	private KafkaSpy kafkaSpy;
+	
+	private KafkaSender kafkaSender;
+	
+	private String traceparent;
+	
+ 
+	public KafkaExecutor() { }
+	
+	public KafkaSpy send(String topic, String payload) {
+		kafkaSender = new KafkaSender(topic, payload);
+		
+		return getSpy();
+	}
+	
+	public KafkaSpy spy(String topic, String traceparent, int timeout, Consumer<String> resolver) {
+		this.traceparent = traceparent;
+		return getSpy().spy(topic, timeout, resolver);
+	}
+	
+	public KafkaSpy spyOptional(String topic, String traceparent, int timeout, Consumer<String> resolver) {
+		this.traceparent = traceparent;
+		return getSpy().spyOptional(topic, timeout, resolver);
+	}
+	
+	private KafkaSpy getSpy() {
+		if (kafkaSpy == null) kafkaSpy = new KafkaSpy(this); 
+		
+		return kafkaSpy;
+	}
+	
+	String getTraceparent() {
+		return traceparent;
+	}
+	
+	String getTraceId() {
+		return traceparent != null ? traceparent.split("-")[1] : null;
+	}
+	
+	void setCorrelationId(String correlationId) {
+		this.traceparent = correlationId;
+	}
+
+	void dispatch() {
+		ExecutorService executor = null;
+		System.out.println("spy"+kafkaSpy);
+		if (kafkaSpy != null) executor = kafkaSpy.execute();
+		if (kafkaSender != null) traceparent = kafkaSender.execute();
+		
+		kafkaSpy.await(executor);
+	}
+}
