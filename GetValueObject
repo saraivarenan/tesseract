@@ -1,4 +1,3 @@
-package br.com.pan.tesseract.modes.api.dataresolver;
 
 import java.util.ArrayList;
 import java.util.List;
