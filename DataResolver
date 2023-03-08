@@ -1,4 +1,3 @@
-package br.com.pan.tesseract.modes.api.dataresolver;
 
 import static org.apache.commons.io.IOUtils.toByteArray;
 
