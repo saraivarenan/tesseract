@@ -1,0 +1,62 @@
+
+
+
+import static java.util.Objects.nonNull;
+import static java.util.UUID.randomUUID;
+
+
+import java.util.Properties;
+
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
+
+class KafkaSender {
+
+	private final String topicConfigName;
+	
+	private final String payload;
+	
+	public KafkaSender(String topicConfigName, String payload) {
+		this.topicConfigName = topicConfigName;
+		this.payload = payload;
+	}
+	
+	String execute() {
+		String topic = ConfigLoader.getConfig().getTesseract().getKafka().getTopics().get(topicConfigName).getTopic();
+		String headerCustom = getHeader();
+		Properties properties = KafkaPametersResolve.mouthProps(topicConfigName, true);
+		String registryUrl = properties.getProperty("schema.registry.url");
+		String versionSchema = properties.getProperty("schema.registry.version", null);
+
+		try (KafkaProducer<Object, Object> kafkaProducer = new KafkaProducer<>(properties)) {
+			Object value = payload;
+			
+			if(nonNull(registryUrl)) {
+				String schemavalue = KafkaSchema.getSchema(registryUrl, topic, versionSchema);
+				value = JsonConverterToAvro.schema(payload, schemavalue);
+			}
+			
+			ProducerRecord<Object, Object> record = new ProducerRecord<>(topic, value);
+			record.headers().add("traceparent", headerCustom.getBytes());
+			
+			kafkaProducer.send(record);
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+
+		System.out.println("Mensagem enviada:");
+		System.out.println("Tópico: " + topic);
+		System.out.println("Header: " + headerCustom);
+
+		return headerCustom;
+	}
+
+	private String getHeader() {
+		String version = "00-";
+		String traceId = randomUUID().toString().replaceAll("-", "").substring(0, 32);
+		String parentId = randomUUID().toString().replaceAll("-", "").substring(0, 16);
+		String traceFlag = "-01";
+		
+		return version + header + "-" + parentId + traceFlag;
+	}
+}
