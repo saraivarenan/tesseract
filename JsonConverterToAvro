@@ -1,8 +1,4 @@
-package br.com.pan.tesseract.modes.api.kafka;
 
-import static br.com.pan.tesseract.modes.api.dataresolver.DataResolver.loadData;
-
-import br.com.pan.tesseract.modes.api.dataresolver.DataResolver;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
