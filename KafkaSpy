@@ -1,0 +1,176 @@
+
+import static java.text.MessageFormat.format;
+import static java.time.Duration.ofMillis;
+import static java.util.concurrent.TimeUnit.MINUTES;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.header.Header;
+
+
+public class KafkaSpy {
+	private final KafkaExecutor kafkaExecutor;
+	
+	private final List<SpyConfig> configs = new ArrayList<>();
+	
+	private final BooleanVl hasError = new BooleanVl();
+	
+	public KafkaSpy(KafkaExecutor kafkaExecutor) {
+		this.kafkaExecutor = kafkaExecutor;
+	}
+
+	public KafkaSpy spy(String configTopicName, int timeoutSec, Consumer<String> resolver) {
+		return spy(configTopicName, timeoutSec, resolver, true);
+	}
+	
+	public KafkaSpy spyOptional(String configTopicName, int timeoutSec, Consumer<String> resolver) {
+		return spy(configTopicName, timeoutSec, resolver, false);
+	}
+	
+	private KafkaSpy spy(String configTopicName, int timeoutSec, Consumer<String> resolver, boolean optional) {
+		SpyConfig spyConfig = new SpyConfig(configTopicName, timeoutSec, resolver, optional);
+		
+		configs.add(spyConfig);
+		
+		return this;
+	}
+	
+	public void dispatch() {
+		kafkaExecutor.dispatch();
+	}
+
+	ExecutorService execute() {
+		if(configs.size() == 0) return null;
+
+		ExecutorService executor = Executors.newFixedThreadPool(configs.size());
+		
+		configs.forEach((it) -> {
+			executor.submit(() -> {
+				try {
+					listen(it, it.configTopicName);
+					Thread.sleep(1200);
+				} catch (Throwable e) {
+					e.printStackTrace();
+					hasError.value = true;
+				}
+			});
+		});
+		
+		return executor;
+	}
+	
+	void await(ExecutorService executor) {
+		if (executor == null) return;
+		try {
+			executor.shutdown();
+			executor.awaitTermination(getGreatherTimeout(), MINUTES);
+			
+			if (hasError.value) throw new KafkaAsyncException();
+		} catch (InterruptedException e) {
+			throw new RuntimeException(e);
+		}
+	}
+	
+	private int getGreatherTimeout() {
+		return configs.stream().map(SpyConfig::getTimeoutSec).reduce(0, Math::max) + 1;
+	}
+	
+	private void listen(SpyConfig config, String topicName) {
+		final Properties kafkaProps = KafkaPametersResolve.mouthProps(topicName, false);
+		
+		String topic = getConfig().getTesseract().getKafka().getTopics().get(topicName).getTopic();
+        
+        try (org.apache.kafka.clients.consumer.Consumer<String, Object> consumer = new KafkaConsumer<>(kafkaProps)) {
+			List<TopicPartition> partitions = consumer.partitionsFor(topic)
+	        		.stream()
+	        		.map(tp -> new TopicPartition(tp.topic(), tp.partition()))
+	        		.collect(Collectors.toList());
+	        	
+	            consumer.assign(partitions);
+	            consumer.seekToEnd(partitions);
+	            
+	            final BooleanVl hasTimeout = new BooleanVl();
+	            final BooleanVl hasSolved = new BooleanVl();
+	            
+	            Timer timer = new Timer();
+	            int timeout = config.timeoutSec * 1000;
+	            
+				timer.schedule(new TimerTask() {
+					@Override
+					public void run() {
+						hasTimeout.value = true;
+					}
+				}, timeout);
+	            
+				System.out.println(format("Aguardando resposta no tópico {0} por {1}s.", topic, timeout));
+				
+	            while (!hasSolved.value) {
+	            	if (hasTimeout.value) {
+	            		if (config.optional) throw new KafkaTimeoutException();
+	            		
+	            		break;
+	            	}
+	            	
+	            	consumer.poll(ofMillis(400L)).forEach(registro -> {
+	            		String traceId = getTraceId(registro);
+						if (!kafkaExecutor.getTraceId().equals(traceId)) {
+	            			System.out.println("Ignorada mensagem no topico " + topic + " com id " + traceId);
+	            			return;
+	            		}
+	            		
+	                	timer.cancel();
+	                	
+	                	hasSolved.value = true;
+	                	
+	                	config.resolver.accept(registro.value().toString());
+	                });
+	            	
+	            	if (hasSolved.value) break;
+				}
+        }
+	}
+	
+	private String getTraceId(ConsumerRecord<String, Object> record) {
+		Header[] headers = record.headers().toArray();
+		
+		for (Header header : headers) {
+			if (header.key().equals("traceparent")) return new String(header.value()).split("-")[1];
+		}
+
+		return null;
+	}
+
+	private static class BooleanVl { private boolean value = false; }
+	
+	private static class SpyConfig {
+		private String configTopicName;
+		
+		private int timeoutSec;
+		
+		private Consumer<String> resolver;
+		
+		private boolean optional;
+		
+		public int getTimeoutSec() {
+			return timeoutSec;
+		}
+
+		public SpyConfig(String configTopicName, int timeoutSec, Consumer<String> resolver, boolean optional) {
+			this.configTopicName = configTopicName;
+			this.timeoutSec = timeoutSec;
+			this.resolver = resolver;
+			this.optional = optional;
+		}
+	}
+}
