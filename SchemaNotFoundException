@@ -1,0 +1,11 @@
+
+
+import static java.lang.String.format;
+
+public class SchemaNotFoundException extends RuntimeException {
+	private static final long serialVersionUID = 1L;
+
+	public SchemaNotFoundException(String topic, String version) {
+		super(format("Não foi possível encontrar o schema para o tópico '%s' na versão '%s'", topic, version));
+	}
+}
