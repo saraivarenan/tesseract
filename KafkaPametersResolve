@@ -1,0 +1,71 @@
+
+
+import static java.lang.String.valueOf;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG;
+import static org.apache.kafka.common.config.SaslConfigs.SASL_JAAS_CONFIG;
+
+import java.text.MessageFormat;
+import java.util.HashMap;
+import java.util.Properties;
+
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
+
+import br.com.pan.tesseract.aws.secretmanager.SecretManager;
+import br.com.pan.tesseract.configuration.ConfigLoader;
+import br.com.pan.tesseract.configuration.objects.KafkaConfig;
+import br.com.pan.tesseract.configuration.objects.KafkaConfig.Topic;
+
+class KafkaPametersResolve {
+
+	private KafkaPametersResolve() { }
+	
+	public static Properties mouthProps(String topicName, boolean isProducer) {
+		KafkaConfig kafkaConfig = ConfigLoader.getConfig().getTesseract().getKafka();
+		String bootstrap = kafkaConfig.getBootstrap();
+		Topic topic = kafkaConfig.getTopics().get(topicName);
+		
+		final Properties kafkaProps = new Properties();
+		kafkaProps.put(ENABLE_AUTO_COMMIT_CONFIG, false);
+        
+		if (isProducer) producer(kafkaProps);
+		else consumer(kafkaProps);
+        
+        kafkaProps.put(BOOTSTRAP_SERVERS_CONFIG, bootstrap);
+        
+        topic.getProps().forEach(kafkaProps::put);
+        
+        resolveSecrets(topic, kafkaProps);
+
+		return kafkaProps;
+	}
+	
+	private static void consumer(Properties kafkaProps) {
+		kafkaProps.put(KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        kafkaProps.put(VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        kafkaProps.put(AUTO_OFFSET_RESET_CONFIG, "latest");
+	}
+	
+	private static void producer(Properties kafkaProps) {
+		kafkaProps.put(KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        kafkaProps.put(VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+	}
+
+	private static void resolveSecrets(Topic topic, final Properties kafkaProps) {
+		if (kafkaProps.get(SASL_JAAS_CONFIG) == null && "SASL_SSL".equals(kafkaProps.get("security.protocol"))) {
+        	kafkaProps.put(SASL_JAAS_CONFIG, "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"{0}\" password=\"{1}\";");
+        }
+        
+        if (kafkaProps.get(SASL_JAAS_CONFIG) != null && topic.getSecret() != null) {
+        	HashMap<String,String> secretValue = SecretManager.getSecretValue(topic.getSecret());
+        	
+        	kafkaProps.put(SASL_JAAS_CONFIG, MessageFormat.format(valueOf(kafkaProps.get(SASL_JAAS_CONFIG)), secretValue.get("username"), secretValue.get("password")));
+        }
+	}
+}
