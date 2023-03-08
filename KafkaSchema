@@ -1,0 +1,26 @@
+
+
+
+class KafkaSchema {
+
+//	private final String version = "6";
+	
+	public static String getSchema(String url, String topic) {
+		return getSchema(url, topic, null);
+	}
+	
+	public static String getSchema(String url, String topic, String version) {
+		if (version == null) version = "latest";
+		
+		String path = url + "/subjects/{subject}-value/versions/{version}";
+		
+    	return RestBuilder.Get(path)
+    		.withPathParam("subject", topic)
+    		.withPathParam("version", version)
+    		.request()
+    		.getBody()
+				.jsonPath()
+				.get("schema").toString();
+
+    }
+}
