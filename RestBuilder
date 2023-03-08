@@ -1,0 +1,247 @@
+package br.com.pan.tesseract.modes.api
+
+import br.com.pan.tesseract.modes.api.dataresolver.DataResolver
+import com.amazonaws.HttpMethod
+import com.amazonaws.HttpMethod.*
+import com.google.gson.Gson
+import com.google.gson.JsonArray
+import io.restassured.RestAssured
+import io.restassured.config.DecoderConfig
+import io.restassured.config.HttpClientConfig
+import io.restassured.config.RestAssuredConfig
+import io.restassured.config.SSLConfig
+import io.restassured.response.Response
+import io.restassured.specification.RequestSpecification
+import org.json.JSONObject
+import java.io.File
+import java.util.function.Consumer
+import java.util.function.Function
+
+
+class RestBuilder private constructor(
+    private val method: HttpMethod,
+    private val path: String
+) {
+    private val headers: MutableMap<String, Any?> = HashMap()
+    private val pathParams: MutableMap<String, Any?> = HashMap()
+    private val cookies: MutableMap<String, Any?> = HashMap()
+    private val queryParams: MutableMap<String, Any?> = HashMap()
+    private val formParams: MutableMap<String, Any?> = HashMap()
+    private val multipartFiles: MutableList<MultiPart> = ArrayList()
+    private var timeoutMilli: Int? = null
+    private var disableSSL = false
+    private var basicAuth: BasicAuth? = null
+    private var body: Any? = null
+    private var attempts: Int? = null
+    private var condition: Function<Response?, Boolean>? = null
+
+    fun withBody(body: DataResolver): RestBuilder {
+        return withBody(body.get())
+    }
+
+    fun withBody(body: Map<String?, Any?>?): RestBuilder {
+        this.body = body
+        return this
+    }
+
+    fun withBody(body: String?): RestBuilder {
+        if (this.body != null) throw RuntimeException("Não é permitido invocar withBody duas vezes")
+        this.body = body
+        return this
+    }
+
+    fun withBody(body: JSONObject) : RestBuilder {
+        this.body = body
+        return this
+    }
+
+    fun withBody(body: Any?) = withBody(Gson().toJson(body))
+
+    fun withMultiPart(controlName: String?, file: File?): RestBuilder {
+        multipartFiles.add(MultiPart(controlName, file))
+        return this
+    }
+
+    fun withHeader(key: String, value: Any?): RestBuilder {
+        headers[key] = value
+        return this
+    }
+
+    @JvmOverloads
+    fun withRetry(
+        attempts: Int,
+        condition: Function<Response?, Boolean>? = Function { resp: Response? -> resp!!.statusCode < 200 || resp.statusCode >= 300 }
+    ): RestBuilder {
+        this.condition = condition
+        this.attempts = attempts
+        return this
+    }
+
+    fun withCookie(key: String, value: Any?): RestBuilder {
+        cookies[key] = value
+        return this
+    }
+
+    fun withQueryParam(key: String, value: Any?): RestBuilder {
+        queryParams[key] = value
+        return this
+    }
+
+    fun withFormParams(key: String, value: Any?): RestBuilder {
+        formParams[key] = value
+        return this
+    }
+
+    fun withTimeout(timeoutMilli: Int?): RestBuilder {
+        this.timeoutMilli = timeoutMilli
+        return this
+    }
+
+    fun withPathParam(key: String, value: Any?): RestBuilder {
+        pathParams[key] = value
+        return this
+    }
+
+    fun withBasicAuth(username: String?, password: String?): RestBuilder {
+        if (basicAuth != null) throw RuntimeException("Não é permitido invocar withBasicAuth duas vezes")
+        basicAuth = BasicAuth(username, password)
+        return this
+    }
+
+    fun withDisableSSL(): RestBuilder {
+        disableSSL = true
+        return this
+    }
+
+    fun request(): Response? {
+        val times = if (attempts == null || attempts!! < 1) 1 else attempts!!
+        var response: Response? = null
+        for (i in 0 until times) {
+            response = prepareRequest()
+                ?.then()
+                ?.extract()
+                ?.response()
+            if (condition != null && !condition!!.apply(response)) return response
+        }
+        return response
+    }
+
+    fun requestPooling(timeout: Int, resolve: Function<Response?, Boolean>): Response? {
+        return requestPooling(timeout, 200, resolve)
+    }
+
+    fun requestPooling(
+        timeout: Int,
+        timeBetween: Int,
+        resolve: Function<Response?, Boolean>
+    ): Response? {
+        val start = System.currentTimeMillis()
+        val interromper = DataRef(false)
+        val data = DataRef<Response?>()
+
+        do {
+            try {
+                val resp = request()
+                if (resolve.apply(resp)) data.value = resp
+            } catch (e: Throwable) {
+                throw RuntimeException(e)
+            }
+        } while (!interromper.value!! && System.currentTimeMillis() - start < timeout)
+
+        return data.value
+    }
+
+    private fun mouthSpecification(): RequestSpecification {
+        val request = RestAssured.given()
+            .config(clientConfig)
+            .headers(headers)
+            .cookies(cookies)
+            .formParams(formParams)
+            .queryParams(queryParams)
+            .pathParams(pathParams)
+        if (body != null) updateBody(body!!, request)
+        if (basicAuth != null) request.auth().preemptive()
+            .basic(basicAuth!!.username, basicAuth!!.password)
+        if (multipartFiles.size > 0) multipartFiles.forEach(Consumer { it: MultiPart ->
+            request.multiPart(
+                it.controlName,
+                it.file
+            )
+        })
+        return request
+    }
+
+    private fun updateBody(body: Any, request: RequestSpecification) {
+        var vl = body
+
+
+        if ("application/x-www-form-urlencoded" == headers["Content-Type"]) {
+            if (vl is JSONObject) vl = vl.toMap()
+
+            if (vl !is Map<*, *>) {
+                val message =
+                    "Quando Content-Type for application/x-www-form-urlencoded é esperado que seja informado um map como body"
+                throw IllegalArgumentException(message)
+            }
+            request.params(vl as MutableMap<String, *>?)
+        } else {
+            if (vl is JSONObject) vl = vl.toString()
+
+            request.body(vl)
+        }
+    }
+
+    private val clientConfig: RestAssuredConfig
+        private get() {
+            var restAssuredConfig = RestAssuredConfig
+                .config()
+                .decoderConfig(DecoderConfig.decoderConfig().defaultContentCharset("UTF-8"))
+            if (timeoutMilli != null) {
+                val clientConfig = HttpClientConfig
+                    .httpClientConfig()
+                    .setParam("http.connection.timeout", timeoutMilli)
+            }
+            if (disableSSL) {
+                restAssuredConfig =
+                    restAssuredConfig.sslConfig(SSLConfig().relaxedHTTPSValidation())
+            }
+            return restAssuredConfig
+        }
+
+    private fun prepareRequest(): Response? {
+        val sp = mouthSpecification()
+
+        return when (method) {
+            HttpMethod.GET -> sp[path]
+            HttpMethod.POST -> sp.post(path)
+            HttpMethod.PUT -> sp.put(path)
+            HttpMethod.DELETE -> sp.delete(path)
+            HttpMethod.HEAD -> sp.head(path)
+            HttpMethod.PATCH -> sp.patch(path)
+            else -> null
+        }
+    }
+
+    private class MultiPart(val controlName: String?, val file: File?)
+    private class BasicAuth(val username: String?, val password: String?)
+    private class DataRef<T> {
+        var value: T? = null
+
+        constructor() {}
+        constructor(value: T) {
+            this.value = value
+        }
+    }
+
+    companion object {
+        @JvmStatic fun Get(path: String) = RestBuilder(GET, path)
+
+        @JvmStatic fun Post(path: String) = RestBuilder(POST, path)
+
+        @JvmStatic fun Put(path: String) = RestBuilder(PUT, path)
+
+        @JvmStatic fun Delete(path: String) = RestBuilder(DELETE, path)
+
+        @JvmStatic fun Patch(path: String) = RestBuilder(PATCH, path)
+    }
+}
