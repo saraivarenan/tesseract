@@ -1,0 +1,92 @@
+package br.com.pan.tesseract.modes.api.dataresolver;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
+
+import com.google.gson.Gson;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+class GetValueObject {
+    private final JSONObject data;
+
+    private final Pattern patternArray = Pattern.compile("(\\w*)\\[(\\d*)\\]");
+
+    public GetValueObject(final JSONObject data) {
+        this.data = data;
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> T get(String propriedade) {
+        String[] fields = propriedade.trim().split("\\.");
+
+        return (T) get(fields, data);
+    }
+    public <T> T get(String propriedade, Class<T> clazz){
+       return new Gson().fromJson(get(propriedade).toString(),clazz);
+    }
+
+    private Object get(String[] campos, Object data) {
+        if (campos == null || campos.length == 0) return data;
+
+        String key = campos[0];
+
+        String[] arrayKeys = getArrayKeys(key);
+
+        if (arrayKeys != null) key = key.replaceAll("([\\w\\.]*)\\[.*", "$1");
+
+        Object value = key.equals("") ? data : ((JSONObject) data).get(key);
+
+        if (arrayKeys != null) {
+            return processarArray(value, campos, arrayKeys);
+        } else {
+            return processarObjeto(value, campos);
+        }
+    }
+
+    private Object processarObjeto(Object value, String[] campos) {
+        if (campos.length > 1) {
+            if (!(value instanceof JSONObject)) throw new IllegalArgumentException("Esperava um objeto");
+
+            return get(extrarProximo(campos), value);
+        }
+
+        return value;
+    }
+
+    private Object processarArray(Object value, String[] campos, String[] arrayKeys) {
+        if (!(value instanceof JSONArray)) throw new IllegalArgumentException("Esperava um array");
+
+        Integer key = Integer.parseInt(arrayKeys[0]);
+
+        value = ((JSONArray) value).get(key);
+
+        if (arrayKeys.length > 1) return processarArray(value, campos, extrarProximo(arrayKeys));
+        else if (campos.length > 1) return get(extrarProximo(campos), value);
+
+        return value;
+    }
+
+    private String[] getArrayKeys(String key) {
+        Matcher matcherArray = patternArray.matcher(key);
+
+        if (!matcherArray.find()) return null;
+
+        List<String> niveis = new ArrayList<>();
+        niveis.add(matcherArray.group(2));
+
+        while(matcherArray.find()) niveis.add(matcherArray.group(2));
+
+        return niveis.toArray(new String[] { });
+    }
+
+
+    private String[] extrarProximo(String[] campos) {
+        return IntStream.range(1, campos.length)
+                .mapToObj(i -> campos[i])
+                .toArray(String[]::new);
+    }
+}
