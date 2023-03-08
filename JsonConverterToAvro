@@ -1,0 +1,70 @@
+package br.com.pan.tesseract.modes.api.kafka;
+
+import static br.com.pan.tesseract.modes.api.dataresolver.DataResolver.loadData;
+
+import br.com.pan.tesseract.modes.api.dataresolver.DataResolver;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.InputStream;
+
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.Decoder;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.Encoder;
+import org.apache.avro.io.EncoderFactory;
+
+class JsonConverterToAvro {
+	private static Schema.Parser parser = new Schema.Parser();
+	
+	private JsonConverterToAvro() { }
+	
+    private static byte[] fromJasonToAvro(String json, Schema schema) throws Exception {
+        try(
+    		InputStream input = new ByteArrayInputStream(json.getBytes());
+			DataInputStream din = new DataInputStream(input)
+        ) {
+            Decoder decoder = DecoderFactory.get().jsonDecoder(schema, din);
+
+            DatumReader<Object> reader = new GenericDatumReader<Object>(schema);
+            Object datum = reader.read(null, decoder);
+
+            GenericDatumWriter<Object> genericWriter = new GenericDatumWriter<Object>(schema);
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
+            Encoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+
+            genericWriter.write(datum, encoder);
+            encoder.flush();
+
+            return outputStream.toByteArray();
+        }
+    }
+    
+    public static GenericRecord schema(String mensagem, String schemaStr) throws Exception {
+    	Schema schema = getSchema(schemaStr);
+    	
+        byte[] avroByteArray = fromJasonToAvro(mensagem.toString(), schema);
+        
+        DatumReader<GenericRecord> reader = new GenericDatumReader<GenericRecord>(schema);
+
+        Decoder decoder = DecoderFactory.get().binaryDecoder(avroByteArray, null);
+        
+        return reader.read(null, decoder);
+    }
+
+	private static Schema getSchema(String schemaStr) {
+		DataResolver carregarDados = DataResolver.loadData(schemaStr);
+    	
+    	String name = carregarDados.get("namespace") + "." + carregarDados.get("name");
+    	
+    	Schema schema = parser.getTypes().get(name);
+    	
+    	return schema == null ? parser.parse(schemaStr) : schema;
+	}
+}
+
