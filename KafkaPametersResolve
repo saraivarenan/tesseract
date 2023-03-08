@@ -17,10 +17,6 @@ import java.util.Properties;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
-import br.com.pan.tesseract.aws.secretmanager.SecretManager;
-import br.com.pan.tesseract.configuration.ConfigLoader;
-import br.com.pan.tesseract.configuration.objects.KafkaConfig;
-import br.com.pan.tesseract.configuration.objects.KafkaConfig.Topic;
 
 class KafkaPametersResolve {
 
