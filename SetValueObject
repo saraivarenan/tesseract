@@ -1,0 +1,104 @@
+package br.com.pan.tesseract.modes.api.dataresolver;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+class SetValueObject {
+
+
+    private final JSONObject data;
+
+    private final Pattern patternArray = Pattern.compile("(\\w*)\\[(\\d*)\\]");
+
+    public SetValueObject(final JSONObject data) {
+        this.data = data;
+    }
+
+    public void set(String propriedade, Object novoValor) {
+        String[] fields = propriedade.trim().split("\\.");
+
+        set(fields, data, novoValor);
+    }
+
+    void set(String[] campos, Object data, Object novoValor) {
+        if (campos == null || campos.length == 0) return;
+
+        String key = campos[0].replaceAll("([\\w\\.]*)\\[.*", "$1");
+
+        String[] arrayKeys = getArrayKeys(campos[0]);
+
+        Object value = key.equals("") ? data : getOrCreate(data, key);
+
+        if (arrayKeys != null) {
+            if (value == null) {
+                value = new JSONArray();
+                ((JSONObject) data).put(key, value);
+            }
+
+            processarArray(value, campos, arrayKeys, novoValor);
+        } else {
+            if (campos.length > 1) {
+                if (value == null) {
+                    value = new JSONObject();
+                    ((JSONObject) data).put(key, value);
+                }
+
+                set(extrarProximo(campos), value, novoValor);
+            } else {
+                ((JSONObject) data).put(key, novoValor);
+            }
+        }
+    }
+
+    private void processarArray(Object data, String[] campos, String[] arrayKeys, Object novoValor) {
+        int index = Integer.parseInt(arrayKeys[0]);
+
+        if (arrayKeys.length > 1) {
+            Object novo = new JSONArray();
+            ((JSONArray) data).put(index, novo);
+            processarArray(novo, campos, extrarProximo(arrayKeys), novoValor);
+        } else {
+            if (campos.length > 1) {
+                Object novo = index < ((JSONArray) data).length() ? ((JSONArray) data).get(index) : new JSONObject();
+                ((JSONArray) data).put(index, novo);
+                set(extrarProximo(campos), novo, novoValor);
+            } else {
+                ((JSONArray) data).put(index, novoValor);
+            }
+        }
+    }
+
+    private String[] getArrayKeys(String key) {
+        Matcher matcherArray = patternArray.matcher(key);
+
+        if (!matcherArray.find()) return null;
+
+        List<String> niveis = new ArrayList<>();
+        niveis.add(matcherArray.group(2));
+
+        while(matcherArray.find()) niveis.add(matcherArray.group(2));
+
+        return niveis.toArray(new String[] { });
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T getOrCreate(Object obj, String key) {
+        try {
+            if (obj instanceof JSONObject) return (T) ((JSONObject) obj).get(key);
+            throw new IllegalArgumentException("Esperava um objeto");
+        } catch (Exception e) { }
+        return null;
+    }
+
+    private String[] extrarProximo(String[] campos) {
+        return IntStream.range(1, campos.length)
+                .mapToObj(i -> campos[i])
+                .toArray(String[]::new);
+    }
+}
